@@ -1,0 +1,14 @@
+
+pandas
+numpy
+duckdb
+python-dotenv
+pydantic
+langgraph
+langchain
+langchain-community
+streamlit
+plotly
+pytest
+
+sqlglot

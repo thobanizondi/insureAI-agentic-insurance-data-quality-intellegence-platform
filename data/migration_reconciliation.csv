@@ -1,0 +1,10 @@
+table_name,source_rows,destination_rows,difference,status
+raw_Claims,5000,5000,0,PASS
+raw_Policies,3000,3000,0,PASS
+raw_Customers,2000,2000,0,PASS
+stg_Claims,5000,5000,0,PASS
+stg_Customers,2000,2000,0,PASS
+stg_Policies,3000,3000,0,PASS
+dim_Date,1096,1096,0,PASS
+dim_RiskCategory,4,4,0,PASS
+claims_snapshot,5000,5000,0,PASS

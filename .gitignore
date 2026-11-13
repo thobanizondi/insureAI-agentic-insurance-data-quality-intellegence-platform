@@ -1,0 +1,26 @@
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Environment variables and secrets
+.env
+.streamlit/secrets.toml
+
+# Local databases
+*.db
+*.duckdb
+
+# Private datasets
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Temporary files
+.ipynb_checkpoints/
+.pytest_cache/
+.DS_Store
+reports/claim_issue_register.csv

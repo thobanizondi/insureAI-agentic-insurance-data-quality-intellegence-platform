@@ -1,0 +1,22 @@
+check,issue_count,status
+Raw claims missing customers,0,PASS
+Raw claims missing policies,0,PASS
+Raw policies missing customers,0,PASS
+Staging claims missing customers,0,PASS
+Staging claims missing policies,0,PASS
+Staging policies missing customers,0,PASS
+Staging claims invalid date keys,0,PASS
+Staging claims date mismatches,0,PASS
+Staging claims invalid risk categories,0,PASS
+Snapshot claims missing customers,0,PASS
+Snapshot claims missing policies,0,PASS
+Duplicate raw claim IDs,0,PASS
+Duplicate raw policy IDs,0,PASS
+Duplicate raw customer IDs,0,PASS
+Duplicate staging claim IDs,0,PASS
+Duplicate staging policy IDs,0,PASS
+Duplicate staging customer IDs,0,PASS
+Duplicate date dimension keys,0,PASS
+Duplicate risk dimension keys,0,PASS
+Duplicate snapshot SCD IDs,0,PASS
+Multiple current snapshot versions,0,PASS
