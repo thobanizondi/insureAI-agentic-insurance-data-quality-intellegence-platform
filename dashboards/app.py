@@ -1,4 +1,3 @@
-
 import contextlib
 import importlib
 import inspect
@@ -13,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+import groq
 import streamlit as st
 import plotly.express as px
 
@@ -637,6 +637,47 @@ def run_agent(module_path, preferred_names, *args):
     )
 
 
+# Cached wrappers: the same request costs no Groq tokens for 24 hours.
+# Failed runs (for example a rate-limit error) are NOT cached.
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def cached_claim_investigation(claim_id: int) -> str:
+    return run_agent(
+        "src.agents.insurance_investigator",
+        [
+            "run_claim_investigation",
+            "run_insurance_investigation",
+            "run_investigation",
+            "investigate_claim"
+        ],
+        claim_id
+    )
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def cached_fraud_investigation(claim_id: int) -> str:
+    return run_agent(
+        "src.agents.fraud_detection_agent",
+        ["run_fraud_investigation"],
+        claim_id
+    )
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def cached_data_quality_investigation() -> str:
+    return run_agent(
+        "src.agents.data_quality_agent",
+        ["run_data_quality_investigation"]
+    )
+
+
+def show_rate_limit_message():
+    st.warning(
+        "The free daily AI quota is used up. "
+        "Please try again in a few minutes, or tomorrow."
+    )
+
+
 def display_agent_error(error, title):
     st.error(f"{title}: {error}")
 
@@ -889,16 +930,7 @@ elif page == "Claim Investigation":
     if st.button("Run Claim Investigation", use_container_width=True):
         with st.spinner("Investigating claim and analysing evidence..."):
             try:
-                report = run_agent(
-                    "src.agents.insurance_investigator",
-                    [
-                        "run_claim_investigation",
-                        "run_insurance_investigation",
-                        "run_investigation",
-                        "investigate_claim"
-                    ],
-                    int(claim_id)
-                )
+                report = cached_claim_investigation(int(claim_id))
 
                 if not isinstance(report, str) or not report.strip():
                     raise RuntimeError(
@@ -911,6 +943,9 @@ elif page == "Claim Investigation":
                 )
 
                 st.success("Claim investigation completed successfully.")
+
+            except groq.RateLimitError:
+                show_rate_limit_message()
 
             except Exception as error:
                 display_agent_error(
@@ -958,11 +993,7 @@ elif page == "Fraud Intelligence":
             "Running fraud detection engine and AI investigation..."
         ):
             try:
-                report = run_agent(
-                    "src.agents.fraud_detection_agent",
-                    ["run_fraud_investigation"],
-                    int(claim_id)
-                )
+                report = cached_fraud_investigation(int(claim_id))
 
                 if not isinstance(report, str) or not report.strip():
                     raise RuntimeError(
@@ -975,6 +1006,9 @@ elif page == "Fraud Intelligence":
                 )
 
                 st.success("Fraud screening completed successfully.")
+
+            except groq.RateLimitError:
+                show_rate_limit_message()
 
             except Exception as error:
                 display_agent_error(
@@ -1033,10 +1067,7 @@ elif page == "Data Quality Intelligence":
             "Running SQL checks and generating intelligence report..."
         ):
             try:
-                report = run_agent(
-                    "src.agents.data_quality_agent",
-                    ["run_data_quality_investigation"]
-                )
+                report = cached_data_quality_investigation()
 
                 if not isinstance(report, str) or not report.strip():
                     raise RuntimeError(
@@ -1048,6 +1079,9 @@ elif page == "Data Quality Intelligence":
                 st.success(
                     "Data quality investigation completed successfully."
                 )
+
+            except groq.RateLimitError:
+                show_rate_limit_message()
 
             except Exception as error:
                 display_agent_error(
@@ -1172,6 +1206,9 @@ elif page == "Ask INSUREAI":
                                 "The database question could not be completed."
                             )
                         )
+
+                except groq.RateLimitError:
+                    show_rate_limit_message()
 
                 except Exception as error:
                     display_agent_error(

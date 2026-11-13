@@ -1,4 +1,3 @@
-
 # Python
 __pycache__/
 *.py[cod]
@@ -9,9 +8,11 @@ venv/
 .env
 .streamlit/secrets.toml
 
-# Local databases
+# Local databases (the demo database is kept on purpose, see below)
 *.db
 *.duckdb
+*.duckdb.wal
+!data/insureai.duckdb
 
 # Private datasets
 data/raw/*
@@ -23,4 +24,3 @@ data/processed/*
 .ipynb_checkpoints/
 .pytest_cache/
 .DS_Store
-reports/claim_issue_register.csv

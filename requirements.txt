@@ -1,7 +1,6 @@
-
 pandas
 numpy
-duckdb
+duckdb>=2.0.0
 python-dotenv
 pydantic
 langgraph
@@ -11,4 +10,5 @@ streamlit
 plotly
 pytest
 langchain-groq
+groq
 sqlglot
