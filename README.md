@@ -1,4 +1,4 @@
-# INSUREAI – Agentic Insurance Data Quality and Intelligence Platform
+# INSUREAI - Agentic Insurance Data Quality and Intelligence Platform
 
 ## Overview
 
