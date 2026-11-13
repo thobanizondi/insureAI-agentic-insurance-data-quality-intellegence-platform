@@ -1,55 +1,109 @@
-# INSUREAI – Agentic Insurance Data Quality and Intelligence Platform
+# INSUREAI - Agentic Insurance Data Quality and Intelligence Platform
+
+An AI-powered insurance data quality and intelligence platform combining data engineering, agentic AI, claims investigation, fraud detection, and natural-language database querying.
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Key Features](#key-features)
+  - [Data Quality Management](#data-quality-management)
+  - [Claims Investigation](#claims-investigation)
+  - [Fraud Detection](#fraud-detection)
+  - [Ask INSUREAI](#ask-insureai)
+  - [Interactive Dashboard](#interactive-dashboard)
+- [Technology Stack](#technology-stack)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Clone the Repository](#clone-the-repository)
+  - [Set Up the Environment](#set-up-the-environment)
+  - [Install Dependencies](#install-dependencies)
+  - [Configure Environment Variables](#configure-environment-variables)
+  - [Configure the Database](#configure-the-database)
+  - [Run the Application](#run-the-application)
+- [Example Ask INSUREAI Questions](#example-ask-insureai-questions)
+- [Security and Data Privacy](#security-and-data-privacy)
+- [Disclaimer](#disclaimer)
+- [Author](#author)
+
+---
 
 ## Overview
 
-INSUREAI is an agentic AI-powered insurance data quality and intelligence platform designed to support insurance data validation, claims investigation, fraud detection, and analytical querying.
+INSUREAI is an agentic AI-powered insurance data quality and intelligence platform designed to improve the way insurance data is validated, investigated, and analysed.
 
-The platform combines data engineering, database validation, business rules, and large language models to help identify data quality issues and provide insights from insurance datasets.
+The platform combines Python-based data engineering, DuckDB analytical storage, business rule validation, and large language models to identify data quality issues and support insurance claims investigation.
 
-It uses DuckDB for analytical data storage, Python for data processing and agent workflows, and Streamlit for the interactive dashboard.
+Through specialised AI agents and an interactive Streamlit dashboard, INSUREAI provides capabilities for data quality assessment, claims investigation, fraud detection, and natural-language querying of insurance datasets.
+
+The project demonstrates how data engineering and agentic AI can work together to support more reliable insurance data and informed analytical decisions.
 
 ## Key Features
 
 ### Data Quality Management
-- Validate insurance data against defined business rules.
+
+- Validate insurance datasets against defined business rules.
 - Identify missing, invalid, and inconsistent records.
-- Perform data relationship and integrity checks.
-- Generate data quality findings and validation reports.
+- Perform data relationship and referential integrity checks.
+- Reconcile source and destination record counts.
+- Generate structured data quality findings and validation reports.
 
 ### Claims Investigation
+
 - Investigate insurance claims against policy information.
-- Identify claims that fall outside policy coverage periods.
+- Identify claims outside policy coverage periods.
 - Detect claims that exceed recorded policy coverage.
-- Provide recommended investigation actions.
+- Validate claim and policy relationships.
+- Generate recommended investigation actions.
 
 ### Fraud Detection
-- Analyse insurance claim information for potential fraud indicators.
-- Apply validation rules to identify suspicious records.
-- Support further investigation through structured findings.
+
+- Analyse insurance claims for potential fraud indicators.
+- Apply business rules to identify suspicious records.
+- Highlight unusual claim information for further investigation.
+- Support investigation through structured analytical findings.
 
 ### Ask INSUREAI
-- Ask natural-language questions about the insurance database.
-- Generate SQL queries to retrieve relevant information.
-- Query approved database tables and metadata.
-- Return query results and explanatory responses.
+
+An AI-powered natural-language database assistant that allows users to interact with insurance data using everyday questions.
+
+Capabilities include:
+
+- Convert natural-language questions into SQL queries.
+- Retrieve information from approved database tables.
+- Inspect database metadata and table structures.
+- Validate generated SQL queries before execution.
+- Execute read-only analytical queries.
+- Return query results with natural-language explanations.
 
 ### Interactive Dashboard
-- Access platform capabilities through a Streamlit interface.
-- Review data quality and validation results.
-- Explore insurance analytics and investigation findings.
-- Interact with the Ask INSUREAI agent.
+
+The Streamlit dashboard provides a central interface for accessing INSUREAI capabilities.
+
+Users can:
+
+- Explore data quality findings.
+- Review insurance validation results.
+- Access claims investigation functionality.
+- Explore fraud detection results.
+- Interact with the Ask INSUREAI assistant.
+- View analytical information through dashboard visualisations.
 
 ## Technology Stack
 
-| Area | Technologies |
+| Category | Technologies |
 |---|---|
-| Programming | Python, SQL |
+| Programming Languages | Python, SQL |
 | Database | DuckDB |
-| Data Engineering | SQL, Python, data validation and reconciliation |
+| Data Engineering | Python, SQL, Data Validation, Data Reconciliation |
 | AI and LLM | Groq API, LangChain, LangGraph |
 | SQL Validation | SQLGlot |
+| Data Analysis | Pandas |
+| Visualisation | Plotly |
 | Dashboard | Streamlit |
-| Data Analysis | Pandas, Plotly |
+| Environment Management | Conda, Python Virtual Environments |
 | Version Control | Git, GitHub |
 
 ## Project Structure
@@ -68,6 +122,7 @@ insureAI-agentic-insurance-data-quality-intelligence-platform/
 │
 ├── src/
 │   ├── agents/
+│   │   ├── __init__.py
 │   │   ├── ask_insureai_agent.py
 │   │   ├── data_quality_agent.py
 │   │   ├── fraud_detection_agent.py
@@ -75,6 +130,8 @@ insureAI-agentic-insurance-data-quality-intelligence-platform/
 │   │
 │   ├── database/
 │   │   ├── duckdb_connection.py
+│   │   ├── inspect_invalid_date_keys.py
+│   │   ├── inspect_relationship_columns.py
 │   │   ├── validate_duckdb.py
 │   │   └── validate_relationships.py
 │   │
@@ -84,7 +141,9 @@ insureAI-agentic-insurance-data-quality-intelligence-platform/
 │       ├── claim_investigation_tools.py
 │       ├── claim_policy_validator.py
 │       ├── data_quality_engine.py
-│       └── fraud_detection_engine.py
+│       ├── fraud_detection_engine.py
+│       ├── test_business_rule_checks.py
+│       └── test_groq_connection.py
 │
 ├── .gitignore
 ├── requirements.txt
@@ -95,32 +154,41 @@ insureAI-agentic-insurance-data-quality-intelligence-platform/
 
 ### Prerequisites
 
-- Python 3.10 or later
-- Conda or Python virtual environment
-- Git
-- Groq API key
+Before running INSUREAI, ensure you have:
 
-### Clone the repository
+- Python 3.10 or later.
+- Conda or Python virtual environment.
+- Git installed.
+- A Groq API key.
+- Access to the INSUREAI DuckDB database or the required database provisioning process.
+
+### Clone the Repository
 
 ```bash
 git clone https://github.com/thobanizondi/insureAI-agentic-insurance-data-quality-intellegence-platform.git
+
 cd insureAI-agentic-insurance-data-quality-intellegence-platform
 ```
 
-### Create and activate an environment
+### Set Up the Environment
+
+Create and activate a Conda environment:
 
 ```bash
 conda create -n insureai python=3.11
+
 conda activate insureai
 ```
 
-### Install dependencies
+### Install Dependencies
+
+Install the project dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### Configure environment variables
+### Configure Environment Variables
 
 Create a `.env` file in the project root:
 
@@ -128,29 +196,37 @@ Create a `.env` file in the project root:
 GROQ_API_KEY=your_groq_api_key
 ```
 
-Do not commit your `.env` file or expose API credentials publicly.
+Replace `your_groq_api_key` with your actual Groq API key.
 
-### Configure the database
+Keep your API key private. Never commit your `.env` file to GitHub.
 
-The application requires its DuckDB database at:
+### Configure the Database
+
+INSUREAI uses DuckDB for analytical data storage.
+
+The expected local database location is:
 
 ```text
 data/insureai.duckdb
 ```
 
-The database must be provisioned using the project's database setup or data-loading process before running the application. The local database file is excluded from Git.
+The database file is excluded from Git version control.
 
-### 6. Run the application
+Before running the application, ensure the database has been provisioned using the project's database setup and data-loading process.
 
-From the project root:
+### Run the Application
+
+From the project root, execute:
 
 ```bash
 streamlit run dashboards/app.py
 ```
 
+Streamlit will start the application and provide a local browser address.
+
 ## Example Ask INSUREAI Questions
 
-Try questions such as:
+Users can interact with the database using natural-language questions such as:
 
 - How many tables do we have?
 - List all the tables in the database.
@@ -158,24 +234,32 @@ Try questions such as:
 - Identify claims that exceed their policy coverage.
 - Are there claims linked to missing customers or policies?
 - What data quality issues have been identified?
+- Show me the available insurance data.
 
-The answers depend on the available database contents and the questions supported by the agent.
+The results depend on the available database contents and the agent's supported query capabilities.
 
 ## Security and Data Privacy
 
-- API credentials are stored in environment variables.
-- Local database files are excluded from version control.
-- Claim-level issue registers and potentially sensitive reports should not be published.
-- SQL queries generated by Ask INSUREAI are subject to validation and read-only restrictions.
+INSUREAI incorporates security considerations into its design:
+
+- API credentials are managed through environment variables.
+- Local database files are excluded from Git version control.
+- Sensitive claim-level reports are excluded from public repositories.
+- Generated SQL queries are subject to validation.
+- Ask INSUREAI is designed for read-only analytical database access.
+- Database access is restricted to approved tables and permitted query operations.
 
 ## Disclaimer
 
-INSUREAI is an analytical and decision-support project. Its outputs are intended to support data quality reviews and insurance investigations, not replace professional claims assessment, fraud investigation, or regulatory decisions.
+INSUREAI is an independent data engineering and AI portfolio project intended for analytical and decision-support purposes.
+
+Its outputs should support, not replace, professional insurance claims assessment, fraud investigation, regulatory compliance, or business decision-making.
 
 ## Author
 
 **Thobani Antony Zondi**
 
-GitHub: https://github.com/thobanizondi
+- GitHub: [thobanizondi](https://github.com/thobanizondi)
+- LinkedIn: [Thobani Zondi](https://linkedin.com/in/thobani-zondi)
 
-LinkedIn: https://linkedin.com/in/thobani-zondi
+*INSUREAI - Bringing Data Engineering and Agentic AI Together for Insurance Intelligence.*
