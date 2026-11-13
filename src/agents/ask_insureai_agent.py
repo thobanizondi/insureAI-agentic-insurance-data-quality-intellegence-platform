@@ -2,6 +2,7 @@ import os
 import json
 from typing import Any, TypedDict
 
+import groq
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -43,7 +44,8 @@ def get_llm():
 
         if not api_key:
             raise ValueError(
-                "GROQ_API_KEY was not found in the .env file."
+                "GROQ_API_KEY was not found in the .env file "
+                "or the environment (Streamlit Cloud: app Settings > Secrets)."
             )
 
         _llm = ChatGroq(
@@ -155,6 +157,10 @@ Previous SQL:
             "error": ""
         }
 
+    except groq.RateLimitError:
+        # Let the dashboard show the friendly quota message.
+        raise
+
     except Exception as exc:
         return {
             "error": f"SQL generation failed: {exc}",
@@ -239,6 +245,10 @@ INSTRUCTIONS:
         return {
             "answer": str(response.content).strip()
         }
+
+    except groq.RateLimitError:
+        # Let the dashboard show the friendly quota message.
+        raise
 
     except Exception as exc:
         return {
