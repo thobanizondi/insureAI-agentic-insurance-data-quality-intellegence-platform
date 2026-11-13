@@ -10,5 +10,5 @@ langchain-community
 streamlit
 plotly
 pytest
-
+langchain-groq
 sqlglot
