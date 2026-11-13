@@ -672,9 +672,26 @@ def cached_data_quality_investigation() -> str:
 
 
 def show_rate_limit_message():
-    st.warning(
-        "The free daily AI quota is used up. "
-        "Please try again in a few minutes, or tomorrow."
+    st.markdown(
+        """
+        <div style="
+            background:#FFF3CD;
+            border:1px solid #F5C542;
+            border-radius:10px;
+            padding:16px 20px;
+            margin:12px 0;
+            color:#D00000;
+            font-weight:700;
+            font-size:16px;
+            line-height:1.6;
+        ">
+            ⚠️ <span style="color:#D00000;">
+            The free daily AI quota is used up.
+            Please try again in a few minutes, or tomorrow.
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
 
