@@ -1,10 +1,11 @@
 
 import contextlib
 import importlib
-import io
 import inspect
+import io
 import json
 import sys
+import traceback
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -464,7 +465,6 @@ div[data-baseweb="popover"] [aria-selected="true"] * {
     color: #000000 !important;
     -webkit-text-fill-color: #000000 !important;
 }
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -498,7 +498,8 @@ def agent_card(icon, title, description, status="BUILT"):
 
 
 def load_agent(module_path):
-    return importlib.import_module(module_path)
+    module = importlib.import_module(module_path)
+    return importlib.reload(module)
 
 
 def find_agent_function(module, preferred_names):
@@ -554,7 +555,6 @@ def extract_message_content(content):
 def extract_final_ai_report(result):
     if isinstance(result, dict):
         messages = result.get("messages", [])
-
     else:
         messages = getattr(result, "messages", [])
 
@@ -566,7 +566,6 @@ def extract_final_ai_report(result):
             message_type = message.get("type")
             content = message.get("content")
             tool_calls = message.get("tool_calls", [])
-
         else:
             message_type = getattr(message, "type", None)
             content = getattr(message, "content", None)
@@ -597,8 +596,11 @@ def run_agent(module_path, preferred_names, *args):
 
     printed_output = output.getvalue()
 
-    if isinstance(result, str) and result.strip():
-        return result.strip()
+    if isinstance(result, str):
+        report = result.strip()
+
+        if report:
+            return report
 
     if isinstance(result, dict) and "messages" in result:
         report = extract_final_ai_report(result)
@@ -609,9 +611,8 @@ def run_agent(module_path, preferred_names, *args):
         if printed_output.strip():
             return printed_output.strip()
 
-        return (
-            "The agent executed, but no final AI investigation "
-            "report was returned."
+        raise RuntimeError(
+            "The agent executed but did not return a final AI report."
         )
 
     if isinstance(result, dict):
@@ -631,20 +632,19 @@ def run_agent(module_path, preferred_names, *args):
     if printed_output.strip():
         return printed_output.strip()
 
-    return "The agent completed without returning a report."
+    raise RuntimeError(
+        "The agent completed without returning a report."
+    )
 
 
-if "latest_reports" not in st.session_state:
-    st.session_state.latest_reports = {}
+def display_agent_error(error, title):
+    st.error(f"{title}: {error}")
 
-if "investigation_history" not in st.session_state:
-    st.session_state.investigation_history = []
-
-if "ask_insureai_result" not in st.session_state:
-    st.session_state.ask_insureai_result = None
-
-if "ask_insureai_question" not in st.session_state:
-    st.session_state.ask_insureai_question = ""
+    with st.expander("View Full Error Details", expanded=True):
+        st.code(
+            traceback.format_exc(),
+            language="python"
+        )
 
 
 def save_report(report, report_type):
@@ -668,6 +668,19 @@ def update_ask_insureai_question():
         st.session_state.ask_insureai_question = selected
 
 
+if "latest_reports" not in st.session_state:
+    st.session_state.latest_reports = {}
+
+if "investigation_history" not in st.session_state:
+    st.session_state.investigation_history = []
+
+if "ask_insureai_result" not in st.session_state:
+    st.session_state.ask_insureai_result = None
+
+if "ask_insureai_question" not in st.session_state:
+    st.session_state.ask_insureai_question = ""
+
+
 with st.sidebar:
     st.markdown(
         """
@@ -682,7 +695,6 @@ with st.sidebar:
     )
 
     st.write("")
-
     st.caption("AGENTIC AI • DATA ENGINEERING")
     st.divider()
 
@@ -701,7 +713,6 @@ with st.sidebar:
     )
 
     st.divider()
-
     st.markdown("### PLATFORM COMPONENTS")
 
     st.markdown(
@@ -725,7 +736,6 @@ with st.sidebar:
     )
 
     st.divider()
-
     st.caption("Independent portfolio project")
     st.caption("2026 | Built by Thobani Zondi")
 
@@ -774,7 +784,6 @@ if page == "Executive Overview":
         )
 
     st.write("")
-
     st.markdown("## Intelligent Investigation Agents")
 
     a1, a2, a3, a4 = st.columns(4)
@@ -808,7 +817,6 @@ if page == "Executive Overview":
         )
 
     st.write("")
-
     st.markdown("## Latest Validated Data Quality Results")
 
     left, right = st.columns([1.2, 1])
@@ -892,6 +900,11 @@ elif page == "Claim Investigation":
                     int(claim_id)
                 )
 
+                if not isinstance(report, str) or not report.strip():
+                    raise RuntimeError(
+                        "The claim investigation returned an empty report."
+                    )
+
                 save_report(
                     report,
                     f"Claim Investigation - {claim_id}"
@@ -900,12 +913,9 @@ elif page == "Claim Investigation":
                 st.success("Claim investigation completed successfully.")
 
             except Exception as error:
-                st.error(f"Claim investigation failed: {error}")
-
-                st.info(
-                    "If the agent uses a different entry-point function "
-                    "or argument signature, inspect its definition before "
-                    "changing the integration."
+                display_agent_error(
+                    error,
+                    "Claim investigation failed"
                 )
 
     report_key = f"Claim Investigation - {int(claim_id)}"
@@ -954,6 +964,11 @@ elif page == "Fraud Intelligence":
                     int(claim_id)
                 )
 
+                if not isinstance(report, str) or not report.strip():
+                    raise RuntimeError(
+                        "Fraud screening returned an empty report."
+                    )
+
                 save_report(
                     report,
                     f"Fraud Intelligence - {claim_id}"
@@ -962,9 +977,12 @@ elif page == "Fraud Intelligence":
                 st.success("Fraud screening completed successfully.")
 
             except Exception as error:
-                st.error(f"Fraud investigation failed: {error}")
+                display_agent_error(
+                    error,
+                    "Fraud investigation failed"
+                )
 
-    report_key = f"Fraud Intelligence - {int(claim_id)}"
+    report_key = f"Fraud Intelligence - {claim_id}"
 
     if report_key in st.session_state.latest_reports:
         st.divider()
@@ -1020,6 +1038,11 @@ elif page == "Data Quality Intelligence":
                     ["run_data_quality_investigation"]
                 )
 
+                if not isinstance(report, str) or not report.strip():
+                    raise RuntimeError(
+                        "Data quality investigation returned an empty report."
+                    )
+
                 save_report(report, "Data Quality Intelligence")
 
                 st.success(
@@ -1027,7 +1050,10 @@ elif page == "Data Quality Intelligence":
                 )
 
             except Exception as error:
-                st.error(f"Data quality investigation failed: {error}")
+                display_agent_error(
+                    error,
+                    "Data quality investigation failed"
+                )
 
     report = st.session_state.latest_reports.get(
         "Data Quality Intelligence"
@@ -1090,7 +1116,7 @@ elif page == "Ask INSUREAI":
         "What is the overall claim rejection rate?"
     ]
 
-    selected_question = st.selectbox(
+    st.selectbox(
         "Choose an example question",
         ["Write my own question"] + example_questions,
         key="ask_insureai_example_question",
@@ -1117,6 +1143,11 @@ elif page == "Ask INSUREAI":
 
                     result = ask_insureai(question.strip())
 
+                    if not isinstance(result, dict):
+                        raise RuntimeError(
+                            "Ask INSUREAI returned an unexpected response."
+                        )
+
                     st.session_state.ask_insureai_result = result
 
                     if result.get("success"):
@@ -1126,10 +1157,10 @@ elif page == "Ask INSUREAI":
 
                         report = (
                             f"# Ask INSUREAI\n\n"
-                            f"**Question:** {result['question']}\n\n"
-                            f"{result['answer']}\n\n"
+                            f"**Question:** {result.get('question', question)}\n\n"
+                            f"{result.get('answer', '')}\n\n"
                             f"**Generated SQL:**\n\n"
-                            f"```sql\n{result['sql']}\n```"
+                            f"```sql\n{result.get('sql', '')}\n```"
                         )
 
                         save_report(report, "Ask INSUREAI")
@@ -1143,7 +1174,10 @@ elif page == "Ask INSUREAI":
                         )
 
                 except Exception as error:
-                    st.error(f"Ask INSUREAI failed: {error}")
+                    display_agent_error(
+                        error,
+                        "Ask INSUREAI failed"
+                    )
 
     result = st.session_state.ask_insureai_result
 

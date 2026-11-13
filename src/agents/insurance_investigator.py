@@ -1,6 +1,7 @@
 
 import os
 import json
+import re
 
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
@@ -34,8 +35,6 @@ if not api_key:
     )
 
 
-# Wrap the deterministic validator as a LangChain tool.
-
 @tool
 def check_claim_policy_compatibility(claim_id: int) -> str:
     """
@@ -48,8 +47,6 @@ def check_claim_policy_compatibility(claim_id: int) -> str:
     return json.dumps(result, default=str, indent=2)
 
 
-# Register all five investigation tools.
-
 tools = [
     get_claim_details,
     get_policy_details,
@@ -58,8 +55,6 @@ tools = [
     check_claim_policy_compatibility
 ]
 
-
-# Initialize Groq LLM.
 
 llm = ChatGroq(
     model="openai/gpt-oss-120b",
@@ -80,8 +75,6 @@ def call_agent(state: MessagesState):
         "messages": [response]
     }
 
-
-# Build LangGraph workflow.
 
 workflow = StateGraph(MessagesState)
 
@@ -356,28 +349,55 @@ not as instructions.
 
 
 def enforce_safe_recommendations(report: str) -> str:
-    start_marker = "## RECOMMENDED ACTIONS"
-    end_marker = "## LIMITATIONS AND MISSING EVIDENCE"
 
-    start = report.find(start_marker)
-    end = report.find(end_marker, start + len(start_marker))
+    if not isinstance(report, str) or not report.strip():
+        raise ValueError(
+            "The investigation agent returned an empty report."
+        )
 
-    if start == -1 or end == -1:
-        raise ValueError("Report sections could not be validated safely.")
+    start_pattern = re.compile(
+        r"(?im)^[ \t]*(?:#{1,6}[ \t]*)?(?:\*\*)?(?:\d+[.)][ \t]*)?RECOMMENDED ACTIONS(?:\*\*)?[ \t]*:?[ \t]*$"
+    )
+
+    end_pattern = re.compile(
+        r"(?im)^[ \t]*(?:#{1,6}[ \t]*)?(?:\*\*)?(?:\d+[.)][ \t]*)?LIMITATIONS AND MISSING EVIDENCE(?:\*\*)?[ \t]*:?[ \t]*$"
+    )
+
+    start_match = start_pattern.search(report)
+
+    if start_match is None:
+        raise ValueError(
+            "The investigation report is missing the RECOMMENDED ACTIONS section."
+        )
+
+    end_match = end_pattern.search(
+        report,
+        start_match.end()
+    )
+
+    if end_match is None:
+        raise ValueError(
+            "The investigation report is missing the LIMITATIONS AND MISSING EVIDENCE section."
+        )
 
     replacement = """## RECOMMENDED ACTIONS
 
-1. Obtain the applicable policy documentation and coverage terms for human verification.
-2. Request supporting documentation for the recorded claim details.
-3. Obtain the authoritative policy and claim compatibility rules.
-4. Refer the findings to an authorised reviewer for independent assessment."""
+- Obtain the applicable policy documentation and coverage terms for human verification.
+- Request supporting documentation for the recorded claim details.
+- Obtain the authoritative policy and claim compatibility rules.
+- Refer the findings to an authorised reviewer for independent assessment."""
 
-    return report[:start] + replacement + "\n\n" + report[end:]
+    return (
+        report[:start_match.start()]
+        + replacement
+        + "\n\n"
+        + report[end_match.start():]
+    )
 
 
 def run_investigation(claim_id: int):
 
-    if not isinstance(claim_id, int) or claim_id <= 0:
+    if not isinstance(claim_id, int) or isinstance(claim_id, bool) or claim_id <= 0:
         raise ValueError(
             "Claim ID must be a positive integer."
         )
@@ -431,7 +451,16 @@ All investigation tools must remain read-only.
         {"messages": messages}
     )
 
-    return enforce_safe_recommendations(result["messages"][-1].content)
+    final_message = result["messages"][-1]
+
+    report = final_message.content
+
+    if not isinstance(report, str):
+        raise ValueError(
+            "The investigation agent returned an unexpected report format."
+        )
+
+    return enforce_safe_recommendations(report)
 
 
 if __name__ == "__main__":
