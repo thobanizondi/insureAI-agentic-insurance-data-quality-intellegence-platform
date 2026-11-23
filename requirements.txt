@@ -12,3 +12,4 @@ pytest
 langchain-groq
 groq
 sqlglot
+posthog

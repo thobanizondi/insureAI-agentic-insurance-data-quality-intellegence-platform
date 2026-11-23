@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import traceback
+import uuid
 from pathlib import Path
 
 import requests
@@ -479,6 +480,76 @@ div[data-baseweb="popover"] [aria-selected="true"] * {
 """, unsafe_allow_html=True)
 
 
+def get_posthog_client():
+    """
+    Return a configured PostHog client when analytics credentials are available.
+
+    The project token is a public client-capture token. No personal API key is
+    required or used by this application.
+    """
+    project_token = os.getenv("POSTHOG_PROJECT_TOKEN")
+    posthog_host = os.getenv("POSTHOG_HOST", "https://us.i.posthog.com")
+
+    if not project_token:
+        try:
+            project_token = st.secrets.get("POSTHOG_PROJECT_TOKEN")
+            posthog_host = st.secrets.get("POSTHOG_HOST", posthog_host)
+        except Exception:
+            return None
+
+    if not project_token:
+        return None
+
+    try:
+        from posthog import Posthog
+
+        return Posthog(project_token, host=posthog_host)
+    except Exception as error:
+        # Analytics must never prevent the main application from loading.
+        print(f"INSUREAI PostHog initialisation unavailable: {error}")
+        return None
+
+
+def track_anonymous_app_visit():
+    """
+    Capture one anonymous app-open event per Streamlit session.
+
+    Streamlit's server-side session state does not provide a durable browser
+    identifier. Each new Streamlit session therefore receives a fresh
+    pseudonymous ID; this does not identify a person or reliably distinguish
+    a returning browser across separate sessions.
+    """
+    if st.session_state.get("posthog_visit_tracked"):
+        return
+
+    st.session_state.posthog_visit_tracked = True
+
+    distinct_id = st.session_state.get("posthog_anonymous_id")
+    if not distinct_id:
+        distinct_id = f"insureai_{uuid.uuid4().hex}"
+        st.session_state.posthog_anonymous_id = distinct_id
+
+    client = get_posthog_client()
+    if client is None:
+        return
+
+    try:
+        client.capture(
+            distinct_id=distinct_id,
+            event="$pageview",
+            properties={
+                "$current_url": "INSUREAI Streamlit application",
+                "app_name": "Thobani-INSUREAI",
+                "tracking_method": "streamlit_server_session",
+                "visitor_type": "anonymous",
+            },
+        )
+        client.flush()
+    except Exception as error:
+        # Analytics failures must not interrupt application functionality.
+        print(f"INSUREAI PostHog event capture unavailable: {error}")
+
+
 def get_view_count():
     """
     Increment and retrieve the INSUREAI application visit counter.
@@ -794,6 +865,9 @@ if "ask_insureai_question" not in st.session_state:
 if "insureai_view_count" not in st.session_state:
     st.session_state.insureai_view_count = get_view_count()
 
+# Capture an anonymous PostHog pageview once per Streamlit session.
+track_anonymous_app_visit()
+
 
 with st.sidebar:
     st.markdown(
@@ -856,6 +930,17 @@ with st.sidebar:
         value=st.session_state.insureai_view_count
     )
     st.caption("Session-based visit count")
+    posthog_configured = bool(os.getenv("POSTHOG_PROJECT_TOKEN"))
+    if not posthog_configured:
+        try:
+            posthog_configured = bool(st.secrets.get("POSTHOG_PROJECT_TOKEN"))
+        except Exception:
+            posthog_configured = False
+    st.caption(
+        "Anonymous analytics enabled"
+        if posthog_configured
+        else "Anonymous analytics not configured"
+    )
     st.caption("Independent portfolio project")
     st.caption("2026 | Built by Thobani Zondi")
 
