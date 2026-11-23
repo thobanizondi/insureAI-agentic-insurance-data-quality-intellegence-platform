@@ -1,3 +1,4 @@
+
 import os
 import json
 from typing import Any, TypedDict
@@ -18,6 +19,11 @@ load_dotenv()
 
 MODEL_NAME = "openai/gpt-oss-120b"
 MAX_SQL_ATTEMPTS = 2
+
+# INSUREAI regional configuration
+DEFAULT_CURRENCY = "ZAR"
+DEFAULT_CURRENCY_SYMBOL = "R"
+DEFAULT_LOCALE = "South Africa"
 
 _llm = None
 
@@ -45,7 +51,7 @@ def get_llm():
         if not api_key:
             raise ValueError(
                 "GROQ_API_KEY was not found in the .env file "
-                "or the environment (Streamlit Cloud: app Settings > Secrets)."
+                "or the environment (Streamlit Cloud: App Settings > Secrets)."
             )
 
         _llm = ChatGroq(
@@ -70,6 +76,27 @@ and DuckDB SQL developer.
 
 Your task is to translate natural-language questions
 into accurate SQL queries against the supplied database.
+
+REGIONAL CONTEXT:
+
+INSUREAI is a South African insurance analytics platform.
+
+Default reporting currency: {DEFAULT_CURRENCY}
+Currency symbol: {DEFAULT_CURRENCY_SYMBOL}
+Region: {DEFAULT_LOCALE}
+
+Important currency rules:
+
+1. Do not assume monetary amounts are denominated in USD.
+2. Do not introduce dollar signs into generated SQL aliases
+   or calculated results.
+3. Do not perform currency conversions unless explicitly
+   requested by the user.
+4. Preserve the original numerical values stored in the database.
+5. Currency formatting belongs to the explanation and
+   presentation layers, not SQL calculations.
+6. If the database explicitly identifies a different currency,
+   do not silently relabel it as ZAR.
 
 DATABASE SCHEMA:
 {schema}
@@ -207,14 +234,17 @@ def explain_results(state: AskInsureAIState):
             "sql": state["sql"],
             "total_returned_rows": state["row_count"],
             "results_truncated": state.get("truncated", False),
-            "sample_results": sample_data
+            "sample_results": sample_data,
+            "reporting_region": DEFAULT_LOCALE,
+            "default_currency": DEFAULT_CURRENCY,
+            "currency_symbol": DEFAULT_CURRENCY_SYMBOL
         }
 
         prompt = f"""
 You are Ask INSUREAI, an insurance data analytics assistant.
 
-Explain the actual database results in clear,
-professional and simple English.
+You provide clear, professional and accurate insurance
+analytics for a South African insurance environment.
 
 USER QUESTION:
 {state["question"]}
@@ -233,8 +263,46 @@ INSTRUCTIONS:
 7. Distinguish potential fraud indicators from confirmed fraud.
 8. Do not make insurance approval, rejection or settlement
    decisions.
-9. Keep the answer concise and useful.
+9. Keep the answer concise, structured and useful.
 10. Do not repeat the SQL query in your explanation.
+11. Do not claim that records are complete unless the
+    supplied result metadata supports that statement.
+
+CURRENCY AND REGIONAL FORMATTING:
+
+12. INSUREAI uses South African Rand (ZAR) as its
+    default reporting currency.
+13. For monetary amounts confirmed or assumed by the
+    platform's reporting convention to be ZAR, use
+    the prefix R.
+
+    Correct example: R254,719.20
+    Incorrect example: $254,719.20
+
+14. Never use the $ symbol for default INSUREAI monetary
+    reporting.
+15. Use two decimal places and comma-separated thousands
+    when presenting monetary values.
+16. Do not convert, recalculate or change the underlying
+    numerical values merely to change their presentation.
+17. Do not invent exchange rates or perform currency
+    conversions unless explicitly requested.
+18. If the supplied database results explicitly identify
+    another currency, disclose that currency instead of
+    silently labelling it ZAR.
+19. If the currency is not identified in the database,
+    use the platform's default reporting convention of ZAR
+    and avoid claiming that the database independently
+    verified the currency.
+
+REPORTING STYLE:
+
+- Use clear section headings where useful.
+- Use tables for comparisons between categories.
+- Use concise bullet points for key observations.
+- Keep numerical values consistent with the query results.
+- Use South African English spelling and terminology.
+
 """
 
         response = get_llm().invoke([
@@ -287,6 +355,10 @@ def route_after_execution(state: AskInsureAIState):
     return "explain"
 
 
+# ---------------------------------------------------------
+# LANGGRAPH WORKFLOW
+# ---------------------------------------------------------
+
 workflow = StateGraph(AskInsureAIState)
 
 workflow.add_node("generate_sql", generate_sql)
@@ -320,6 +392,10 @@ workflow.add_edge("handle_failure", END)
 
 ask_insureai_workflow = workflow.compile()
 
+
+# ---------------------------------------------------------
+# PUBLIC AGENT ENTRY POINT
+# ---------------------------------------------------------
 
 def ask_insureai(question: str):
     """Public entry point for the Ask INSUREAI agent."""
