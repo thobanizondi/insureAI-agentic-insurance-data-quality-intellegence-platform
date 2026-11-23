@@ -3,9 +3,19 @@ import importlib
 import inspect
 import io
 import json
+import os
 import sys
 import traceback
 from pathlib import Path
+
+import requests
+
+# Load local environment variables when python-dotenv is installed.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+except ImportError:
+    pass
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -469,6 +479,48 @@ div[data-baseweb="popover"] [aria-selected="true"] * {
 """, unsafe_allow_html=True)
 
 
+def get_view_count():
+    """
+    Increment and retrieve the INSUREAI application visit counter.
+
+    The counter is incremented once per Streamlit session, rather than
+    on every script rerun caused by navigation or widget interaction.
+    """
+    api_key = os.getenv("COUNTER_API_KEY")
+
+    if not api_key:
+        try:
+            api_key = st.secrets["COUNTER_API_KEY"]
+        except Exception:
+            return "Not configured"
+
+    if not api_key:
+        return "Not configured"
+
+    endpoint = (
+        "https://api.counterapi.dev/v2/"
+        "thobani-zondis-team-5205/insureai-data-quality/up"
+    )
+
+    try:
+        response = requests.get(
+            endpoint,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=5
+        )
+        response.raise_for_status()
+
+        payload = response.json()
+        count = payload.get("data", {}).get("up_count")
+
+        return count if count is not None else "Unavailable"
+
+    except (requests.RequestException, ValueError) as error:
+        # Keep tracking failures from interrupting the main application.
+        print(f"INSUREAI visit counter unavailable: {error}")
+        return "Unavailable"
+
+
 def metric_card(label, value, caption):
     st.markdown(
         f"""
@@ -738,6 +790,10 @@ if "ask_insureai_result" not in st.session_state:
 if "ask_insureai_question" not in st.session_state:
     st.session_state.ask_insureai_question = ""
 
+# Count one application visit per Streamlit session.
+if "insureai_view_count" not in st.session_state:
+    st.session_state.insureai_view_count = get_view_count()
+
 
 with st.sidebar:
     st.markdown(
@@ -794,6 +850,12 @@ with st.sidebar:
     )
 
     st.divider()
+    st.markdown("### PLATFORM ACTIVITY")
+    st.metric(
+        label="APPLICATION VISITS",
+        value=st.session_state.insureai_view_count
+    )
+    st.caption("Session-based visit count")
     st.caption("Independent portfolio project")
     st.caption("2026 | Built by Thobani Zondi")
 
