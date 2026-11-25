@@ -13,7 +13,6 @@ from pathlib import Path
 
 import requests
 
-# Load local environment variables when python-dotenv is installed.
 try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -479,7 +478,6 @@ div[data-baseweb="popover"] [aria-selected="true"] * {
     -webkit-text-fill-color: #000000 !important;
 }
 
-/* Print layout: hide navigation and controls, retain report content. */
 @media print {
     [data-testid="stSidebar"],
     [data-testid="stHeader"],
@@ -517,14 +515,7 @@ div[data-baseweb="popover"] [aria-selected="true"] * {
 """, unsafe_allow_html=True)
 
 
-# ---------------------------------------------------------------------
-# ANALYTICS AND VISIT TRACKING
-# ---------------------------------------------------------------------
-
 def get_posthog_client():
-    """
-    Return a configured PostHog client when analytics credentials exist.
-    """
     project_token = os.getenv("POSTHOG_PROJECT_TOKEN")
     posthog_host = os.getenv(
         "POSTHOG_HOST",
@@ -557,9 +548,6 @@ def get_posthog_client():
 
 
 def track_anonymous_app_visit():
-    """
-    Capture one anonymous app-open event per Streamlit session.
-    """
     if st.session_state.get("posthog_visit_tracked"):
         return
 
@@ -597,9 +585,6 @@ def track_anonymous_app_visit():
 
 
 def get_view_count():
-    """
-    Increment and retrieve the INSUREAI application visit counter.
-    """
     api_key = os.getenv("COUNTER_API_KEY")
 
     if not api_key:
@@ -636,10 +621,6 @@ def get_view_count():
         return "Unavailable"
 
 
-# ---------------------------------------------------------------------
-# DASHBOARD COMPONENTS
-# ---------------------------------------------------------------------
-
 def metric_card(label, value, caption):
     st.markdown(
         f"""
@@ -667,10 +648,6 @@ def agent_card(icon, title, description, status="BUILT"):
         unsafe_allow_html=True
     )
 
-
-# ---------------------------------------------------------------------
-# AGENT LOADING AND EXECUTION
-# ---------------------------------------------------------------------
 
 def load_agent(module_path):
     module = importlib.import_module(module_path)
@@ -821,10 +798,6 @@ def run_agent(module_path, preferred_names, *args):
     )
 
 
-# ---------------------------------------------------------------------
-# CACHED AGENT EXECUTION
-# ---------------------------------------------------------------------
-
 @st.cache_data(ttl=86400, show_spinner=False)
 def cached_claim_investigation(claim_id: int) -> str:
     return run_agent(
@@ -856,31 +829,10 @@ def cached_data_quality_investigation() -> str:
     )
 
 
-# ---------------------------------------------------------------------
-# FRAUD REPORT DATA MASKING
-# ---------------------------------------------------------------------
-
-def mask_fraud_report(report, claim_id):
-    """
-    Mask the customer name in the final fraud report.
-
-    The fraud engine and AI agent retain access to the original
-    evidence. Masking is applied only to the report presented to
-    the user and saved in the application session.
-
-    Other investigation details remain readable, including:
-    - Claim ID
-    - Customer ID
-    - Policy ID
-    - Claim date
-    - Claim amount
-    - Claim type and status
-    - Fraud indicators and evidence
-    - Risk explanations and recommendations
-    """
-    if not isinstance(report, str):
+def mask_investigation_report(report, claim_id, report_type):
+    if not isinstance(report, str) or not report.strip():
         raise TypeError(
-            "Fraud report must be a string."
+            "Investigation report must be a non-empty string."
         )
 
     claim_id = int(claim_id)
@@ -889,14 +841,14 @@ def mask_fraud_report(report, claim_id):
 
     if not isinstance(evidence, dict):
         raise RuntimeError(
-            "The fraud engine returned an unexpected evidence response."
+            "The investigation engine returned an unexpected evidence response."
         )
 
     if evidence.get("status") == "NOT_FOUND":
         audit_event(
-            event="fraud_report_masking",
+            event="report_masking",
             status="claim_not_found",
-            details=f"Claim ID: {claim_id}"
+            details=f"Report type: {report_type}; Claim ID: {claim_id}"
         )
         raise RuntimeError(
             "Claim evidence could not be verified. "
@@ -907,19 +859,18 @@ def mask_fraud_report(report, claim_id):
 
     if customer_name is None or not str(customer_name).strip():
         audit_event(
-            event="fraud_report_masking",
-            status="no_customer_name",
-            details=f"Claim ID: {claim_id}"
+            event="report_masking",
+            status="customer_name_unavailable",
+            details=f"Report type: {report_type}; Claim ID: {claim_id}"
         )
-
-        # No customer name was returned by the evidence engine.
-        return report
+        raise RuntimeError(
+            "Customer information could not be verified for masking. "
+            "The report was not saved or displayed."
+        )
 
     customer_name = str(customer_name).strip()
     masked_name = mask_customer_name(customer_name)
 
-    # Match the original name case-insensitively and allow
-    # differences in whitespace between name components.
     name_parts = customer_name.split()
 
     name_pattern = re.compile(
@@ -937,9 +888,10 @@ def mask_fraud_report(report, claim_id):
 
     if replacement_count:
         audit_event(
-            event="fraud_report_masking",
+            event="report_masking",
             status="success",
             details=(
+                f"Report type: {report_type}; "
                 f"Claim ID: {claim_id}; "
                 f"customer name replacements: {replacement_count}"
             )
@@ -947,22 +899,14 @@ def mask_fraud_report(report, claim_id):
 
         return masked_report
 
-    # Do not silently claim that masking occurred if the original
-    # customer name was not found in the generated report.
     audit_event(
-        event="fraud_report_masking",
+        event="report_masking",
         status="name_not_found_in_report",
-        details=f"Claim ID: {claim_id}"
+        details=f"Report type: {report_type}; Claim ID: {claim_id}"
     )
 
-    # The exact source name is not present in the report, so it is
-    # not exposed by this report. All other report details remain.
     return report
 
-
-# ---------------------------------------------------------------------
-# REPORT AND ERROR HANDLING
-# ---------------------------------------------------------------------
 
 def show_rate_limit_message():
     st.markdown(
@@ -1002,11 +946,6 @@ def display_agent_error(error, title):
 
 
 def save_report(report, report_type):
-    """
-    Save a report to the current Streamlit session.
-
-    Fraud reports must be masked before they reach this function.
-    """
     if not isinstance(report, str) or not report.strip():
         raise ValueError(
             "Cannot save an empty investigation report."
@@ -1024,11 +963,6 @@ def save_report(report, report_type):
 
 
 def print_report():
-    """
-    Trigger the browser print dialog.
-
-    The print stylesheet hides dashboard navigation and controls.
-    """
     components.html(
         """
         <script>
@@ -1049,10 +983,6 @@ def update_ask_insureai_question():
         st.session_state.ask_insureai_question = selected
 
 
-# ---------------------------------------------------------------------
-# SESSION STATE
-# ---------------------------------------------------------------------
-
 if "latest_reports" not in st.session_state:
     st.session_state.latest_reports = {}
 
@@ -1070,10 +1000,6 @@ if "insureai_view_count" not in st.session_state:
 
 track_anonymous_app_visit()
 
-
-# ---------------------------------------------------------------------
-# SIDEBAR
-# ---------------------------------------------------------------------
 
 with st.sidebar:
     st.markdown(
@@ -1160,10 +1086,6 @@ with st.sidebar:
     st.caption("Independent portfolio project")
     st.caption("2026 | Built by Thobani Zondi")
 
-
-# =====================================================================
-# EXECUTIVE OVERVIEW
-# =====================================================================
 
 if page == "Executive Overview":
 
@@ -1307,10 +1229,6 @@ if page == "Executive Overview":
     )
 
 
-# =====================================================================
-# CLAIM INVESTIGATION
-# =====================================================================
-
 elif page == "Claim Investigation":
 
     st.title("🔍 Claim Investigation")
@@ -1344,9 +1262,15 @@ elif page == "Claim Investigation":
                         "The claim investigation returned an empty report."
                     )
 
-                save_report(
+                masked_report = mask_investigation_report(
                     report,
-                    f"Claim Investigation - {claim_id}"
+                    int(claim_id),
+                    "Claim Investigation"
+                )
+
+                save_report(
+                    masked_report,
+                    f"Claim Investigation - {int(claim_id)}"
                 )
 
                 st.success(
@@ -1374,17 +1298,30 @@ elif page == "Claim Investigation":
 
         st.markdown(report)
 
-        st.download_button(
-            "Download Claim Report",
-            data=report,
-            file_name=f"insureai_claim_{int(claim_id)}.md",
-            mime="text/markdown"
+        st.caption(
+            "Customer names are masked. Claim, customer and policy "
+            "references remain readable."
         )
 
+        print_col, download_col = st.columns(2)
 
-# =====================================================================
-# FRAUD INTELLIGENCE
-# =====================================================================
+        with print_col:
+            if st.button(
+                "🖨️ Print Claim Report",
+                use_container_width=True,
+                key=f"print_claim_{int(claim_id)}"
+            ):
+                print_report()
+
+        with download_col:
+            st.download_button(
+                "Download Claim Report",
+                data=report,
+                file_name=f"insureai_claim_{int(claim_id)}.md",
+                mime="text/markdown",
+                use_container_width=True
+            )
+
 
 elif page == "Fraud Intelligence":
 
@@ -1411,7 +1348,6 @@ elif page == "Fraud Intelligence":
             "Running fraud detection engine and AI investigation..."
         ):
             try:
-                # Step 1: Run the fraud investigation using original evidence.
                 report = cached_fraud_investigation(
                     int(claim_id)
                 )
@@ -1421,15 +1357,12 @@ elif page == "Fraud Intelligence":
                         "Fraud screening returned an empty report."
                     )
 
-                # Step 2: Mask customer information in the final report.
-                # The underlying investigation data is not modified.
-                masked_report = mask_fraud_report(
+                masked_report = mask_investigation_report(
                     report,
-                    int(claim_id)
+                    int(claim_id),
+                    "Fraud Intelligence"
                 )
 
-                # Step 3: Save only the masked version.
-                # Screen, history and download use this same report.
                 save_report(
                     masked_report,
                     f"Fraud Intelligence - {int(claim_id)}"
@@ -1490,10 +1423,6 @@ elif page == "Fraud Intelligence":
         "automatically hold, reject or reverse a claim."
     )
 
-
-# =====================================================================
-# DATA QUALITY INTELLIGENCE
-# =====================================================================
 
 elif page == "Data Quality Intelligence":
 
@@ -1573,10 +1502,6 @@ elif page == "Data Quality Intelligence":
         "it does not change source records."
     )
 
-
-# =====================================================================
-# ASK INSUREAI
-# =====================================================================
 
 elif page == "Ask INSUREAI":
 
@@ -1949,10 +1874,6 @@ elif page == "Ask INSUREAI":
     )
 
 
-# =====================================================================
-# INVESTIGATION REPORTS
-# =====================================================================
-
 elif page == "Investigation Reports":
 
     st.title("📁 Investigation Reports")
@@ -1995,10 +1916,6 @@ elif page == "Investigation Reports":
                     key=f"download_report_{index}"
                 )
 
-
-# =====================================================================
-# TECHNICAL ARCHITECTURE
-# =====================================================================
 
 elif page == "Technical Architecture":
 
@@ -2081,10 +1998,6 @@ elif page == "Technical Architecture":
         "insurance claims system."
     )
 
-
-# =====================================================================
-# FOOTER
-# =====================================================================
 
 st.divider()
 
