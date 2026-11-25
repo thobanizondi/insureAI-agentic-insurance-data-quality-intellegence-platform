@@ -1,9 +1,11 @@
+
 import contextlib
 import importlib
 import inspect
 import io
 import json
 import os
+import re
 import sys
 import traceback
 import uuid
@@ -25,7 +27,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import groq
 import streamlit as st
+import streamlit.components.v1 as components
 import plotly.express as px
+
+from src.tools.fraud_detection_engine import detect_claim_risk
+from src.utils.data_masking import mask_customer_name
+from src.utils.security_audit import audit_event
 
 
 st.set_page_config(
@@ -85,7 +92,7 @@ html, body, [class*="css"] {
 }
 
 [data-testid="stSidebar"] * {
-    color: var(--text);
+    color: #FFFFFF !important;
 }
 
 h1, h2, h3 {
@@ -385,11 +392,6 @@ textarea::placeholder {
     color: #FFFFFF;
 }
 
-[data-testid="stSidebar"],
-[data-testid="stSidebar"] * {
-    color: #FFFFFF !important;
-}
-
 [data-testid="stHeader"],
 [data-testid="stHeader"] * {
     color: #000000 !important;
@@ -476,24 +478,66 @@ div[data-baseweb="popover"] [aria-selected="true"] * {
     color: #000000 !important;
     -webkit-text-fill-color: #000000 !important;
 }
+
+/* Print layout: hide navigation and controls, retain report content. */
+@media print {
+    [data-testid="stSidebar"],
+    [data-testid="stHeader"],
+    [data-testid="stToolbar"],
+    [data-testid="stStatusWidget"],
+    [data-testid="stDownloadButton"],
+    [data-testid="stButton"],
+    footer {
+        display: none !important;
+    }
+
+    .stApp {
+        background: #FFFFFF !important;
+        color: #000000 !important;
+    }
+
+    .stApp h1,
+    .stApp h2,
+    .stApp h3,
+    .stApp p,
+    .stApp div,
+    .stApp span {
+        color: #000000 !important;
+    }
+
+    [data-testid="stMarkdownContainer"] {
+        color: #000000 !important;
+    }
+
+    body {
+        background: #FFFFFF !important;
+    }
+}
 </style>
 """, unsafe_allow_html=True)
 
 
+# ---------------------------------------------------------------------
+# ANALYTICS AND VISIT TRACKING
+# ---------------------------------------------------------------------
+
 def get_posthog_client():
     """
-    Return a configured PostHog client when analytics credentials are available.
-
-    The project token is a public client-capture token. No personal API key is
-    required or used by this application.
+    Return a configured PostHog client when analytics credentials exist.
     """
     project_token = os.getenv("POSTHOG_PROJECT_TOKEN")
-    posthog_host = os.getenv("POSTHOG_HOST", "https://us.i.posthog.com")
+    posthog_host = os.getenv(
+        "POSTHOG_HOST",
+        "https://us.i.posthog.com"
+    )
 
     if not project_token:
         try:
             project_token = st.secrets.get("POSTHOG_PROJECT_TOKEN")
-            posthog_host = st.secrets.get("POSTHOG_HOST", posthog_host)
+            posthog_host = st.secrets.get(
+                "POSTHOG_HOST",
+                posthog_host
+            )
         except Exception:
             return None
 
@@ -502,22 +546,19 @@ def get_posthog_client():
 
     try:
         from posthog import Posthog
-
         return Posthog(project_token, host=posthog_host)
+
     except Exception as error:
-        # Analytics must never prevent the main application from loading.
-        print(f"INSUREAI PostHog initialisation unavailable: {error}")
+        print(
+            "INSUREAI PostHog initialisation unavailable: "
+            f"{error}"
+        )
         return None
 
 
 def track_anonymous_app_visit():
     """
     Capture one anonymous app-open event per Streamlit session.
-
-    Streamlit's server-side session state does not provide a durable browser
-    identifier. Each new Streamlit session therefore receives a fresh
-    pseudonymous ID; this does not identify a person or reliably distinguish
-    a returning browser across separate sessions.
     """
     if st.session_state.get("posthog_visit_tracked"):
         return
@@ -525,11 +566,13 @@ def track_anonymous_app_visit():
     st.session_state.posthog_visit_tracked = True
 
     distinct_id = st.session_state.get("posthog_anonymous_id")
+
     if not distinct_id:
         distinct_id = f"insureai_{uuid.uuid4().hex}"
         st.session_state.posthog_anonymous_id = distinct_id
 
     client = get_posthog_client()
+
     if client is None:
         return
 
@@ -545,17 +588,17 @@ def track_anonymous_app_visit():
             },
         )
         client.flush()
+
     except Exception as error:
-        # Analytics failures must not interrupt application functionality.
-        print(f"INSUREAI PostHog event capture unavailable: {error}")
+        print(
+            "INSUREAI PostHog event capture unavailable: "
+            f"{error}"
+        )
 
 
 def get_view_count():
     """
     Increment and retrieve the INSUREAI application visit counter.
-
-    The counter is incremented once per Streamlit session, rather than
-    on every script rerun caused by navigation or widget interaction.
     """
     api_key = os.getenv("COUNTER_API_KEY")
 
@@ -587,10 +630,15 @@ def get_view_count():
         return count if count is not None else "Unavailable"
 
     except (requests.RequestException, ValueError) as error:
-        # Keep tracking failures from interrupting the main application.
-        print(f"INSUREAI visit counter unavailable: {error}")
+        print(
+            f"INSUREAI visit counter unavailable: {error}"
+        )
         return "Unavailable"
 
+
+# ---------------------------------------------------------------------
+# DASHBOARD COMPONENTS
+# ---------------------------------------------------------------------
 
 def metric_card(label, value, caption):
     st.markdown(
@@ -620,6 +668,10 @@ def agent_card(icon, title, description, status="BUILT"):
     )
 
 
+# ---------------------------------------------------------------------
+# AGENT LOADING AND EXECUTION
+# ---------------------------------------------------------------------
+
 def load_agent(module_path):
     module = importlib.import_module(module_path)
     return importlib.reload(module)
@@ -633,7 +685,8 @@ def find_agent_function(module, preferred_names):
             return candidate
 
     for name, candidate in inspect.getmembers(
-        module, inspect.isfunction
+        module,
+        inspect.isfunction
     ):
         if (
             candidate.__module__ == module.__name__
@@ -689,6 +742,7 @@ def extract_final_ai_report(result):
             message_type = message.get("type")
             content = message.get("content")
             tool_calls = message.get("tool_calls", [])
+
         else:
             message_type = getattr(message, "type", None)
             content = getattr(message, "content", None)
@@ -710,7 +764,10 @@ def extract_final_ai_report(result):
 
 def run_agent(module_path, preferred_names, *args):
     module = load_agent(module_path)
-    function = find_agent_function(module, preferred_names)
+    function = find_agent_function(
+        module,
+        preferred_names
+    )
 
     output = io.StringIO()
 
@@ -739,7 +796,11 @@ def run_agent(module_path, preferred_names, *args):
         )
 
     if isinstance(result, dict):
-        return json.dumps(result, indent=2, default=str)
+        return json.dumps(
+            result,
+            indent=2,
+            default=str
+        )
 
     if result is not None:
         report = extract_final_ai_report(result)
@@ -760,8 +821,9 @@ def run_agent(module_path, preferred_names, *args):
     )
 
 
-# Cached wrappers: the same request costs no Groq tokens for 24 hours.
-# Failed runs (for example a rate-limit error) are NOT cached.
+# ---------------------------------------------------------------------
+# CACHED AGENT EXECUTION
+# ---------------------------------------------------------------------
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def cached_claim_investigation(claim_id: int) -> str:
@@ -794,6 +856,114 @@ def cached_data_quality_investigation() -> str:
     )
 
 
+# ---------------------------------------------------------------------
+# FRAUD REPORT DATA MASKING
+# ---------------------------------------------------------------------
+
+def mask_fraud_report(report, claim_id):
+    """
+    Mask the customer name in the final fraud report.
+
+    The fraud engine and AI agent retain access to the original
+    evidence. Masking is applied only to the report presented to
+    the user and saved in the application session.
+
+    Other investigation details remain readable, including:
+    - Claim ID
+    - Customer ID
+    - Policy ID
+    - Claim date
+    - Claim amount
+    - Claim type and status
+    - Fraud indicators and evidence
+    - Risk explanations and recommendations
+    """
+    if not isinstance(report, str):
+        raise TypeError(
+            "Fraud report must be a string."
+        )
+
+    claim_id = int(claim_id)
+
+    evidence = detect_claim_risk(claim_id)
+
+    if not isinstance(evidence, dict):
+        raise RuntimeError(
+            "The fraud engine returned an unexpected evidence response."
+        )
+
+    if evidence.get("status") == "NOT_FOUND":
+        audit_event(
+            event="fraud_report_masking",
+            status="claim_not_found",
+            details=f"Claim ID: {claim_id}"
+        )
+        raise RuntimeError(
+            "Claim evidence could not be verified. "
+            "The report was not saved or displayed."
+        )
+
+    customer_name = evidence.get("customer_name")
+
+    if customer_name is None or not str(customer_name).strip():
+        audit_event(
+            event="fraud_report_masking",
+            status="no_customer_name",
+            details=f"Claim ID: {claim_id}"
+        )
+
+        # No customer name was returned by the evidence engine.
+        return report
+
+    customer_name = str(customer_name).strip()
+    masked_name = mask_customer_name(customer_name)
+
+    # Match the original name case-insensitively and allow
+    # differences in whitespace between name components.
+    name_parts = customer_name.split()
+
+    name_pattern = re.compile(
+        r"\s+".join(
+            re.escape(part)
+            for part in name_parts
+        ),
+        flags=re.IGNORECASE
+    )
+
+    masked_report, replacement_count = name_pattern.subn(
+        lambda match: masked_name,
+        report
+    )
+
+    if replacement_count:
+        audit_event(
+            event="fraud_report_masking",
+            status="success",
+            details=(
+                f"Claim ID: {claim_id}; "
+                f"customer name replacements: {replacement_count}"
+            )
+        )
+
+        return masked_report
+
+    # Do not silently claim that masking occurred if the original
+    # customer name was not found in the generated report.
+    audit_event(
+        event="fraud_report_masking",
+        status="name_not_found_in_report",
+        details=f"Claim ID: {claim_id}"
+    )
+
+    # The exact source name is not present in the report, so it is
+    # not exposed by this report. All other report details remain.
+    return report
+
+
+# ---------------------------------------------------------------------
+# REPORT AND ERROR HANDLING
+# ---------------------------------------------------------------------
+
 def show_rate_limit_message():
     st.markdown(
         """
@@ -821,7 +991,10 @@ def show_rate_limit_message():
 def display_agent_error(error, title):
     st.error(f"{title}: {error}")
 
-    with st.expander("View Full Error Details", expanded=True):
+    with st.expander(
+        "View Full Error Details",
+        expanded=True
+    ):
         st.code(
             traceback.format_exc(),
             language="python"
@@ -829,6 +1002,16 @@ def display_agent_error(error, title):
 
 
 def save_report(report, report_type):
+    """
+    Save a report to the current Streamlit session.
+
+    Fraud reports must be masked before they reach this function.
+    """
+    if not isinstance(report, str) or not report.strip():
+        raise ValueError(
+            "Cannot save an empty investigation report."
+        )
+
     st.session_state.latest_reports[report_type] = report
 
     st.session_state.investigation_history.insert(
@@ -840,6 +1023,23 @@ def save_report(report, report_type):
     )
 
 
+def print_report():
+    """
+    Trigger the browser print dialog.
+
+    The print stylesheet hides dashboard navigation and controls.
+    """
+    components.html(
+        """
+        <script>
+            window.parent.print();
+        </script>
+        """,
+        height=0,
+        width=0
+    )
+
+
 def update_ask_insureai_question():
     selected = st.session_state.ask_insureai_example_question
 
@@ -848,6 +1048,10 @@ def update_ask_insureai_question():
     else:
         st.session_state.ask_insureai_question = selected
 
+
+# ---------------------------------------------------------------------
+# SESSION STATE
+# ---------------------------------------------------------------------
 
 if "latest_reports" not in st.session_state:
     st.session_state.latest_reports = {}
@@ -861,13 +1065,15 @@ if "ask_insureai_result" not in st.session_state:
 if "ask_insureai_question" not in st.session_state:
     st.session_state.ask_insureai_question = ""
 
-# Count one application visit per Streamlit session.
 if "insureai_view_count" not in st.session_state:
     st.session_state.insureai_view_count = get_view_count()
 
-# Capture an anonymous PostHog pageview once per Streamlit session.
 track_anonymous_app_visit()
 
+
+# ---------------------------------------------------------------------
+# SIDEBAR
+# ---------------------------------------------------------------------
 
 with st.sidebar:
     st.markdown(
@@ -925,25 +1131,39 @@ with st.sidebar:
 
     st.divider()
     st.markdown("### PLATFORM ACTIVITY")
+
     st.metric(
         label="APPLICATION VISITS",
         value=st.session_state.insureai_view_count
     )
+
     st.caption("Session-based visit count")
-    posthog_configured = bool(os.getenv("POSTHOG_PROJECT_TOKEN"))
+
+    posthog_configured = bool(
+        os.getenv("POSTHOG_PROJECT_TOKEN")
+    )
+
     if not posthog_configured:
         try:
-            posthog_configured = bool(st.secrets.get("POSTHOG_PROJECT_TOKEN"))
+            posthog_configured = bool(
+                st.secrets.get("POSTHOG_PROJECT_TOKEN")
+            )
         except Exception:
             posthog_configured = False
+
     st.caption(
         "Anonymous analytics enabled"
         if posthog_configured
         else "Anonymous analytics not configured"
     )
+
     st.caption("Independent portfolio project")
     st.caption("2026 | Built by Thobani Zondi")
 
+
+# =====================================================================
+# EXECUTIVE OVERVIEW
+# =====================================================================
 
 if page == "Executive Overview":
 
@@ -973,13 +1193,25 @@ if page == "Executive Overview":
     c1, c2, c3, c4 = st.columns(4)
 
     with c1:
-        metric_card("AI AGENTS", "04", "Investigation capabilities")
+        metric_card(
+            "AI AGENTS",
+            "04",
+            "Investigation capabilities"
+        )
 
     with c2:
-        metric_card("RECORDS PROFILED", "10,000", "Validated database profile")
+        metric_card(
+            "RECORDS PROFILED",
+            "10,000",
+            "Validated database profile"
+        )
 
     with c3:
-        metric_card("QUALITY FINDINGS", "2,797", "Latest validated engine run")
+        metric_card(
+            "QUALITY FINDINGS",
+            "2,797",
+            "Latest validated engine run"
+        )
 
     with c4:
         metric_card(
@@ -1075,6 +1307,10 @@ if page == "Executive Overview":
     )
 
 
+# =====================================================================
+# CLAIM INVESTIGATION
+# =====================================================================
+
 elif page == "Claim Investigation":
 
     st.title("🔍 Claim Investigation")
@@ -1091,10 +1327,17 @@ elif page == "Claim Investigation":
         step=1
     )
 
-    if st.button("Run Claim Investigation", use_container_width=True):
-        with st.spinner("Investigating claim and analysing evidence..."):
+    if st.button(
+        "Run Claim Investigation",
+        use_container_width=True
+    ):
+        with st.spinner(
+            "Investigating claim and analysing evidence..."
+        ):
             try:
-                report = cached_claim_investigation(int(claim_id))
+                report = cached_claim_investigation(
+                    int(claim_id)
+                )
 
                 if not isinstance(report, str) or not report.strip():
                     raise RuntimeError(
@@ -1106,7 +1349,9 @@ elif page == "Claim Investigation":
                     f"Claim Investigation - {claim_id}"
                 )
 
-                st.success("Claim investigation completed successfully.")
+                st.success(
+                    "Claim investigation completed successfully."
+                )
 
             except groq.RateLimitError:
                 show_rate_limit_message()
@@ -1117,7 +1362,9 @@ elif page == "Claim Investigation":
                     "Claim investigation failed"
                 )
 
-    report_key = f"Claim Investigation - {int(claim_id)}"
+    report_key = (
+        f"Claim Investigation - {int(claim_id)}"
+    )
 
     if report_key in st.session_state.latest_reports:
         st.divider()
@@ -1134,6 +1381,10 @@ elif page == "Claim Investigation":
             mime="text/markdown"
         )
 
+
+# =====================================================================
+# FRAUD INTELLIGENCE
+# =====================================================================
 
 elif page == "Fraud Intelligence":
 
@@ -1152,24 +1403,41 @@ elif page == "Fraud Intelligence":
         key="fraud_claim_id"
     )
 
-    if st.button("Run Fraud Screening", use_container_width=True):
+    if st.button(
+        "Run Fraud Screening",
+        use_container_width=True
+    ):
         with st.spinner(
             "Running fraud detection engine and AI investigation..."
         ):
             try:
-                report = cached_fraud_investigation(int(claim_id))
+                # Step 1: Run the fraud investigation using original evidence.
+                report = cached_fraud_investigation(
+                    int(claim_id)
+                )
 
                 if not isinstance(report, str) or not report.strip():
                     raise RuntimeError(
                         "Fraud screening returned an empty report."
                     )
 
-                save_report(
+                # Step 2: Mask customer information in the final report.
+                # The underlying investigation data is not modified.
+                masked_report = mask_fraud_report(
                     report,
-                    f"Fraud Intelligence - {claim_id}"
+                    int(claim_id)
                 )
 
-                st.success("Fraud screening completed successfully.")
+                # Step 3: Save only the masked version.
+                # Screen, history and download use this same report.
+                save_report(
+                    masked_report,
+                    f"Fraud Intelligence - {int(claim_id)}"
+                )
+
+                st.success(
+                    "Fraud screening completed successfully."
+                )
 
             except groq.RateLimitError:
                 show_rate_limit_message()
@@ -1180,7 +1448,9 @@ elif page == "Fraud Intelligence":
                     "Fraud investigation failed"
                 )
 
-    report_key = f"Fraud Intelligence - {claim_id}"
+    report_key = (
+        f"Fraud Intelligence - {int(claim_id)}"
+    )
 
     if report_key in st.session_state.latest_reports:
         st.divider()
@@ -1190,12 +1460,29 @@ elif page == "Fraud Intelligence":
 
         st.markdown(report)
 
-        st.download_button(
-            "Download Fraud Report",
-            data=report,
-            file_name=f"insureai_fraud_{int(claim_id)}.md",
-            mime="text/markdown"
+        st.caption(
+            "Customer names are masked in this report. "
+            "Claim, customer and policy references remain readable."
         )
+
+        print_col, download_col = st.columns(2)
+
+        with print_col:
+            if st.button(
+                "🖨️ Print Fraud Report",
+                use_container_width=True,
+                key=f"print_fraud_{int(claim_id)}"
+            ):
+                print_report()
+
+        with download_col:
+            st.download_button(
+                "Download Fraud Report",
+                data=report,
+                file_name=f"insureai_fraud_{int(claim_id)}.md",
+                mime="text/markdown",
+                use_container_width=True
+            )
 
     st.warning(
         "A flagged indicator requires appropriate investigation. "
@@ -1203,6 +1490,10 @@ elif page == "Fraud Intelligence":
         "automatically hold, reject or reverse a claim."
     )
 
+
+# =====================================================================
+# DATA QUALITY INTELLIGENCE
+# =====================================================================
 
 elif page == "Data Quality Intelligence":
 
@@ -1226,7 +1517,10 @@ elif page == "Data Quality Intelligence":
 
     st.divider()
 
-    if st.button("Run Data Quality Investigation", use_container_width=True):
+    if st.button(
+        "Run Data Quality Investigation",
+        use_container_width=True
+    ):
         with st.spinner(
             "Running SQL checks and generating intelligence report..."
         ):
@@ -1238,7 +1532,10 @@ elif page == "Data Quality Intelligence":
                         "Data quality investigation returned an empty report."
                     )
 
-                save_report(report, "Data Quality Intelligence")
+                save_report(
+                    report,
+                    "Data Quality Intelligence"
+                )
 
                 st.success(
                     "Data quality investigation completed successfully."
@@ -1276,6 +1573,10 @@ elif page == "Data Quality Intelligence":
         "it does not change source records."
     )
 
+
+# =====================================================================
+# ASK INSUREAI
+# =====================================================================
 
 elif page == "Ask INSUREAI":
 
@@ -1323,14 +1624,22 @@ elif page == "Ask INSUREAI":
 
     question = st.text_area(
         "Ask a question about your insurance data",
-        placeholder="For example: Which provinces have the highest total claim amounts?",
+        placeholder=(
+            "For example: Which provinces have the highest "
+            "total claim amounts?"
+        ),
         height=110,
         key="ask_insureai_question"
     )
 
-    if st.button("Ask INSUREAI", use_container_width=True):
+    if st.button(
+        "Ask INSUREAI",
+        use_container_width=True
+    ):
         if not question.strip():
-            st.warning("Please enter a question before continuing.")
+            st.warning(
+                "Please enter a question before continuing."
+            )
 
         else:
             with st.spinner(
@@ -1339,7 +1648,9 @@ elif page == "Ask INSUREAI":
                 try:
                     from src.agents.ask_insureai_agent import ask_insureai
 
-                    result = ask_insureai(question.strip())
+                    result = ask_insureai(
+                        question.strip()
+                    )
 
                     if not isinstance(result, dict):
                         raise RuntimeError(
@@ -1355,13 +1666,17 @@ elif page == "Ask INSUREAI":
 
                         report = (
                             f"# Ask INSUREAI\n\n"
-                            f"**Question:** {result.get('question', question)}\n\n"
+                            f"**Question:** "
+                            f"{result.get('question', question)}\n\n"
                             f"{result.get('answer', '')}\n\n"
                             f"**Generated SQL:**\n\n"
                             f"```sql\n{result.get('sql', '')}\n```"
                         )
 
-                        save_report(report, "Ask INSUREAI")
+                        save_report(
+                            report,
+                            "Ask INSUREAI"
+                        )
 
                     else:
                         st.error(
@@ -1391,7 +1706,10 @@ elif page == "Ask INSUREAI":
 
         st.markdown("**INSUREAI response**")
         st.markdown(
-            result.get("answer", "No explanation was returned.")
+            result.get(
+                "answer",
+                "No explanation was returned."
+            )
         )
 
         if result.get("success"):
@@ -1408,7 +1726,9 @@ elif page == "Ask INSUREAI":
             with metric2:
                 st.metric(
                     "RESULT STATUS",
-                    "Truncated" if result.get("truncated") else "Complete"
+                    "Truncated"
+                    if result.get("truncated")
+                    else "Complete"
                 )
 
             if dataframe is not None:
@@ -1429,8 +1749,10 @@ elif page == "Ask INSUREAI":
                 category_columns = [
                     column
                     for column in dataframe.columns
-                    if column not in numeric_columns
-                    or column in date_columns
+                    if (
+                        column not in numeric_columns
+                        or column in date_columns
+                    )
                 ]
 
                 chart_values = [
@@ -1444,21 +1766,28 @@ elif page == "Ask INSUREAI":
                     and category_columns
                     and chart_values
                 ):
-                    st.markdown("### Interactive Visualization")
+                    st.markdown(
+                        "### Interactive Visualization"
+                    )
 
                     st.caption(
                         "Explore your query results using interactive charts. "
                         "Select a chart type, category and measurement."
                     )
 
-                    chart_options = ["Bar", "Line", "Pie"]
+                    chart_options = [
+                        "Bar",
+                        "Line",
+                        "Pie"
+                    ]
 
                     default_chart = (
                         "Line" if date_columns else "Bar"
                     )
 
                     column_signature = "_".join(
-                        str(column) for column in dataframe.columns
+                        str(column)
+                        for column in dataframe.columns
                     )
 
                     chart_col1, chart_col2, chart_col3 = st.columns(3)
@@ -1475,14 +1804,20 @@ elif page == "Ask INSUREAI":
                         x_axis = st.selectbox(
                             "Category / X-axis",
                             category_columns,
-                            key=f"ask_insureai_x_axis_{column_signature}"
+                            key=(
+                                f"ask_insureai_x_axis_"
+                                f"{column_signature}"
+                            )
                         )
 
                     with chart_col3:
                         y_axis = st.selectbox(
                             "Measure / Y-axis",
                             chart_values,
-                            key=f"ask_insureai_y_axis_{column_signature}"
+                            key=(
+                                f"ask_insureai_y_axis_"
+                                f"{column_signature}"
+                            )
                         )
 
                     chart_data = dataframe[
@@ -1560,7 +1895,6 @@ elif page == "Ask INSUREAI":
                     )
 
                 else:
-
                     st.caption(
                         "Interactive charts are available when the query "
                         "returns multiple rows, a category column and "
@@ -1615,6 +1949,10 @@ elif page == "Ask INSUREAI":
     )
 
 
+# =====================================================================
+# INVESTIGATION REPORTS
+# =====================================================================
+
 elif page == "Investigation Reports":
 
     st.title("📁 Investigation Reports")
@@ -1634,9 +1972,13 @@ elif page == "Investigation Reports":
         )
 
     else:
-        st.metric("COMPLETED REPORTS", len(history))
+        st.metric(
+            "COMPLETED REPORTS",
+            len(history)
+        )
 
         for index, item in enumerate(history):
+
             with st.expander(
                 f"{index + 1}. {item['type']}",
                 expanded=(index == 0)
@@ -1646,11 +1988,17 @@ elif page == "Investigation Reports":
                 st.download_button(
                     "Download Report",
                     data=item["report"],
-                    file_name=f"insureai_report_{index + 1}.md",
+                    file_name=(
+                        f"insureai_report_{index + 1}.md"
+                    ),
                     mime="text/markdown",
                     key=f"download_report_{index}"
                 )
 
+
+# =====================================================================
+# TECHNICAL ARCHITECTURE
+# =====================================================================
 
 elif page == "Technical Architecture":
 
@@ -1708,7 +2056,9 @@ elif page == "Technical Architecture":
     }
 
     for category, technology in technologies.items():
-        st.markdown(f"**{category}:** {technology}")
+        st.markdown(
+            f"**{category}:** {technology}"
+        )
 
     st.markdown("## Engineering Principles")
 
@@ -1731,6 +2081,10 @@ elif page == "Technical Architecture":
         "insurance claims system."
     )
 
+
+# =====================================================================
+# FOOTER
+# =====================================================================
 
 st.divider()
 
